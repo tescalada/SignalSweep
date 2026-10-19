@@ -4,6 +4,46 @@ All notable changes to SignalSweep are recorded here.
 
 ## [Unreleased]
 
+### Added -- Nearby LED mode
+
+- **A fifth Lights mode, Nearby (`{"led":4}`),** shows what is around right
+  now. Five pixels at the far end of the bar from the heartbeat pixel are
+  ALPR, body cam, drone, tracker and other (pixels 7 down to 3); each blinks once per device of its category in that category's app color
+  (250 ms on, 250 ms off), rests one blink slot, then repeats. An empty
+  category stays dark. No cap on the count. Each pixel latches its count
+  when its cycle starts, so a count that changes mid-cycle shows from the
+  next cycle instead of cutting a run of blinks short or merging two.
+- **The counts are the app's Everything rows.** Every device the board lists
+  (`scanAll` or confidence at or above `CONF_LIST_MIN`, not yet pruned) is
+  grouped once with the app's `groupSiblings()` rules, across categories and
+  through unmatched radios while the filter is off, and each box counts once under its lead's
+  category (`unitLead()`: a type beats a matched rule beats nothing). A box
+  led by a "no match" radio is not counted. Ignored and muted devices count,
+  because the app still lists them. The work runs in the 1 Hz task only while
+  Nearby is selected, and adds no field to the push.
+- **Status and alerts.** The heartbeat stays on pixel 0 (green, blue in
+  receive-only). When an alert sounds, pixels 0-2 flash in its category color for the length of the full-bar animation it
+  replaces, covering the heartbeat while it runs; the counts stay up and the buzzer pattern is
+  unchanged. The egg, flashes, the hunt meter and LED Off keep their
+  precedence.
+- **Themes do not recolor Nearby** (`applyTheme()` returns early, as for One):
+  a pixel's color is its category.
+- Persisted in the `led` NVS key like the other modes; the NVS load,
+  `setLedMode()` and the `{"led":N}` command all clamp to 4.
+- `firmware/test/nearby_test.cpp` (run by `run.sh` with the attack-detector
+  tests) covers the blink schedule and latch, the label rules, MAC parsing,
+  and the grouping and lead choice. `selftest.js` pins a Lights button per
+  `LedMode`, all three clamps to the highest mode, the `applyTheme()`
+  exemption, `NEARBY_SIBLING_SPAN` against the app's `SIBLING_SPAN`, and the
+  pixel colors against `--ss-cat-*`.
+
+Known edges, accepted: a hunted device below `CONF_LIST_MIN` rides in the
+push and so shows in the app, but is not counted, since the count uses the
+listing predicate alone. The app's radio chips (BLE / Wi-Fi / AP / Client)
+filter its Everything list, while the bar always counts every radio. With 400 tracked devices the count costs about
+10 KB of short-lived heap a second while Nearby is selected. The frame
+layout is checked on hardware, not in a test.
+
 ### Fixed -- `install.py` accepts ESP32-C5 module variants
 
 - **`install.py` refused an ESP32-C5-N16R8 dev board** (issue #1): esptool

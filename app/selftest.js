@@ -44,7 +44,7 @@ import { spawnSync } from 'node:child_process';
         console.log('FAIL: firmware/test/run.sh:\n' + (cxx.stdout || '') + (cxx.stderr || ''));
         process.exit(1);
     } else {
-        console.log('[signalsweep self-test] attack_detectors host tests: ok');
+        console.log('[signalsweep self-test] attack_detectors + nearby host tests: ok');
     }
 }
 
@@ -309,6 +309,45 @@ if (!/if \(!flashActive\) applyTheme\(now\)/.test(hwSrc))
     themeFail.push('flash frames are recoloured by applyTheme');
 if (themeFail.length) { console.log('FAIL: themes:', themeFail); process.exit(1); }
 console.log('[signalsweep self-test] theme ids match firmware ThemeId: ok');
+
+// LED modes are another shared index. Every LedMode needs a Lights button, and
+// every clamp (NVS load, setLedMode, the {"led":N} command) must clamp to the
+// highest one, or a new mode is picked in the app and silently lands on the
+// old top mode. Nearby also has parity with the app it must keep: its pixel
+// colors are the app's category colors, its grouping span is the app's, and
+// applyTheme must leave it alone (its colors ARE the category).
+const ledFail = [];
+const ledHdr = readFileSync(new URL('../firmware/src/hardware_manager.h', import.meta.url), 'utf8');
+const fwLedModes = ((ledHdr.match(/enum LedMode[^{]*\{([^}]*)\}/) || [])[1] || '').match(/LED_[A-Z]+/g) || [];
+const ledTop = fwLedModes[fwLedModes.length - 1];
+if (fwLedModes.length < 5) ledFail.push('firmware LedMode has ' + fwLedModes.length + ' entries');
+fwLedModes.forEach((m, i) => {
+    if (!htmlSrc.includes('data-led="' + i + '"')) ledFail.push('no Lights button for ' + m + ' (' + i + ')');
+});
+if ((htmlSrc.match(/data-led="\d+"/g) || []).length !== fwLedModes.length)
+    ledFail.push('#led-modes button count differs from LedMode');
+const bleSerialSrc = readFileSync(new URL('../firmware/src/ble_serial.cpp', import.meta.url), 'utf8');
+if (!new RegExp('constrain\\(doc\\["led"\\]\\.as<int>\\(\\), 0, \\(int\\)' + ledTop + '\\)').test(bleSerialSrc))
+    ledFail.push('the {"led":N} command does not clamp to ' + ledTop);
+if (!new RegExp('ledMode = led > ' + ledTop + ' \\? ' + ledTop + ' : led;').test(hwSrc))
+    ledFail.push('the NVS load does not clamp to ' + ledTop);
+if (!new RegExp('ledMode = mode > ' + ledTop + ' \\? ' + ledTop + ' : mode;').test(hwSrc))
+    ledFail.push('setLedMode does not clamp to ' + ledTop);
+if (!/LED_NEARBY/.test(applyThemeBody)) ledFail.push('applyTheme does not return early for LED_NEARBY');
+const nearbySrc = readFileSync(new URL('../firmware/src/nearby.h', import.meta.url), 'utf8');
+const fwSpan = Number((nearbySrc.match(/#define NEARBY_SIBLING_SPAN (\d+)/) || [])[1]);
+const appSpan = Number((appSrc.match(/const SIBLING_SPAN = (\d+);/) || [])[1]);
+if (!(fwSpan > 0) || fwSpan !== appSpan) ledFail.push('NEARBY_SIBLING_SPAN ' + fwSpan + ' vs SIBLING_SPAN ' + appSpan);
+const cssSrc = readFileSync(new URL('./public/signalsweep.css', import.meta.url), 'utf8');
+const fwColors = (((hwSrc.match(/static const uint32_t NEARBY_COLORS\[[^\]]*\] = \{([^}]*)\}/) || [])[1] || '')
+    .match(/0x[0-9a-fA-F]{6}/g) || []).map(c => '#' + c.slice(2).toLowerCase());
+['alpr', 'bodycam', 'drone', 'tracker', 'other'].forEach((k, i) => {
+    const css = ((cssSrc.match(new RegExp('--ss-cat-' + k + ':\\s*(#[0-9a-fA-F]{6})')) || [])[1] || '').toLowerCase();
+    if (!css || fwColors[i] !== css) ledFail.push('NEARBY_COLORS[' + i + '] ' + fwColors[i] + ' vs --ss-cat-' + k + ' ' + css);
+});
+if (fwColors.length !== 5) ledFail.push('NEARBY_COLORS has ' + fwColors.length + ' colors');
+if (ledFail.length) { console.log('FAIL: LED modes:', ledFail); process.exit(1); }
+console.log('[signalsweep self-test] LED modes match firmware LedMode, Nearby parity: ok');
 
 // Buzzer volume is LEDC duty. Arduino tone() queues each note to a task that
 // writes a fixed 50 % duty, so any tone()/noTone() left in the file either

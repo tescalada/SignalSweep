@@ -2,6 +2,7 @@
 // Copyright (C) 2026 B0z0dcl0wn and the SignalSweep contributors
 
 #include "hardware_manager.h"
+#include "nearby.h"
 #include <Adafruit_NeoPixel.h>
 #include <Preferences.h>
 #include <esp_log.h>
@@ -41,6 +42,19 @@ static volatile bool buzzerEnabled = true;
 static volatile uint8_t ledMode = LED_FULL;
 // Same contract as ledMode: one byte, no hwMutex.
 static volatile uint8_t themeId = THEME_CLASSIC;
+// Nearby LED mode: listed devices per AlertCategory, written by the 1 Hz
+// watchers task. Same contract as ledMode: no hwMutex. Each entry is one
+// aligned 16-bit store, so a reader sees the old or the new count, never a
+// torn one; a frame between two entries' writes is one category a second stale.
+static volatile uint16_t nearbyCounts[NEARBY_CATEGORIES] = {0, 0, 0, 0, 0};
+// The app's category colors (--ss-cat-* in signalsweep.css; selftest pins
+// them equal), indexed by AlertCategory: alpr, bodycam, drone, tracker, other.
+static const uint32_t NEARBY_COLORS[NEARBY_CATEGORIES] = {0xef4444, 0xff7a1a, 0x3aa0ff, 0xff3ac8, 0xf59e0b};
+// Where nearby.h's layout meets the render code and AlertCategory.
+static_assert(NEARBY_CATEGORIES == ALERT_GENERIC + 1, "Nearby has one pixel per AlertCategory");
+static_assert(NEARBY_PIXELS == NEOPIXEL_COUNT, "Nearby's layout is for the 8-LED bar");
+// Per-pixel cycle state (nearby.h). The render task's alone, so no lock.
+static NearbyLatch nearbyLatch[NEARBY_CATEGORIES] = {};
 // Easter-egg scene. Same volatile/no-mutex contract as ledMode, and the same
 // reason: it must never fail on a lock. Unlike ledMode and themeId it is NOT
 // persisted and NOT reported -- see setEggScene().
@@ -329,6 +343,30 @@ static void drawHuntMeter(int rssi) {
         strip.setPixelColor(i, dim(c, 0.5f * constrain(fill - i, 0.0f, 1.0f)));
 }
 
+// Watchers' idle heartbeat: one dim pixel glows up and down once every 4 s.
+// 0 while it rests. Green, or blue in receive-only.
+static uint32_t heartbeatColor(uint32_t now) {
+    uint32_t t = now % 4000;
+    if (t >= 800) return 0;
+    uint32_t s = t < 400 ? t : 800 - t;  // 0..400..0
+    return rxOnlyIndicator
+        ? strip.Color(0, 40 * s / 400, 110 * s / 400)
+        : strip.Color(0, 120 * s / 400, 50 * s / 400);
+}
+
+// Nearby LED mode: one pixel per AlertCategory at the far end of the strip
+// from the heartbeat pixel (nearbyCategoryPixel). Each blinks once per listed
+// device of its category, in that category's app color, then rests one slot.
+// Each pixel latches its count for a whole cycle (nearbyLatchOn), so a count
+// that changes mid-cycle never cuts a run short or merges two. An empty
+// category stays dark. Pixels 0 .. NEARBY_FLASH_PIXELS-1 are left to the
+// caller: heartbeat, or the new-device flash.
+static void drawNearbyCounts(uint32_t now) {
+    for (int c = 0; c < NEARBY_CATEGORIES; c++)
+        if (nearbyLatchOn(nearbyLatch[c], nearbyCounts[c], now))
+            strip.setPixelColor(nearbyCategoryPixel(c), NEARBY_COLORS[c]);
+}
+
 // Recolour the finished frame: each pixel keeps its brightness (the brightest
 // channel) and takes the theme's hue, so an animation's shape and the hunt
 // meter's length -- the parts that carry meaning -- survive any theme. Works
@@ -336,10 +374,11 @@ static void drawHuntMeter(int rssi) {
 // in the same space the LED-mode block below expects. NEO_GRB buffer order.
 // The egg bails here rather than at the call site: selftest pins the literal
 // `if (!flashActive) applyTheme(now)` in the task. Terminal green over a
-// flashlight is not a flashlight.
+// flashlight is not a flashlight. Nearby bails too: its colors ARE the
+// category, so a mono theme would erase what each pixel means.
 static void applyTheme(uint32_t now) {
     uint8_t th = themeId;
-    if (th == THEME_CLASSIC || ledMode == LED_ONE || eggScene) return;
+    if (th == THEME_CLASSIC || ledMode == LED_ONE || eggScene || ledMode == LED_NEARBY) return;
     uint8_t *px = strip.getPixels();
     for (int i = 0; i < NEOPIXEL_COUNT; i++) {
         uint8_t *p = px + i * 3;
@@ -511,8 +550,10 @@ static void HardwareManagerTask(void *pvParameters) {
 
             // 3. Render the bar. Priority: a hard flash (siren strobe, manual
             // triggerLedFlash) > a category alert animation > the hunt meter >
-            // the idle heartbeat. The frame is redrawn every tick and pushed to
-            // the strip only when it changed.
+            // the idle heartbeat. LED Nearby adds its count display to the idle
+            // heartbeat and swaps a category alert's animation for a flash of
+            // the heartbeat end of the bar over the counts. The frame is
+            // redrawn every tick and pushed to the strip only when it changed.
             uint32_t currentPixelColor = strip.Color(0, 0, 0);
             bool onePixel = false;  // idle heartbeat lights LED 0 only
             bool drawn = false;     // an animation or the meter owns the frame
@@ -543,7 +584,17 @@ static void HardwareManagerTask(void *pvParameters) {
             } else if (flashActive) {
                 currentPixelColor = strip.Color(flashR, flashG, flashB);
             } else if (animCat >= 0 && now - animStart < ANIM_MS[animCat]) {
-                drawAnimation(animCat, now - animStart);
+                if (ledMode == LED_NEARBY && animCat <= ALERT_GENERIC) {
+                    // Nearby keeps the counts on screen through an alert: the
+                    // top three pixels flash the new device's category color
+                    // for as long as the full-bar animation would have run.
+                    drawNearbyCounts(now);
+                    if ((now - animStart) % 200 < 120)
+                        for (int i = 0; i < NEARBY_FLASH_PIXELS; i++)
+                            strip.setPixelColor(i, NEARBY_COLORS[animCat]);
+                } else {
+                    drawAnimation(animCat, now - animStart);
+                }
                 drawn = true;
             } else if (geigerLocked) {
                 animCat = -1;
@@ -569,6 +620,15 @@ static void HardwareManagerTask(void *pvParameters) {
                         break;
                     }
                     case MODE_WATCHERS_WATCH: {
+                        // Nearby: the live per-category count, with the
+                        // heartbeat on its usual pixel. Before Party, which
+                        // applyTheme() does not touch under Nearby.
+                        if (ledMode == LED_NEARBY) {
+                            drawNearbyCounts(now);
+                            strip.setPixelColor(NEARBY_STATUS_PIXEL, heartbeatColor(now));
+                            drawn = true;
+                            break;
+                        }
                         // Party gives up the quiet heartbeat on purpose: the
                         // whole bar drifts through a dim rainbow. A flat grey
                         // here becomes the rainbow in applyTheme(). LED One
@@ -589,14 +649,8 @@ static void HardwareManagerTask(void *pvParameters) {
                         // Receive-only is invisible by definition, and a device
                         // that looks broken is worse than one that is. Blue
                         // instead of green says "still watching, not talking".
-                        uint32_t t = now % 4000;
-                        if (t < 800) {
-                            uint32_t s = t < 400 ? t : 800 - t;  // 0..400..0
-                            currentPixelColor = rxOnlyIndicator
-                                ? strip.Color(0, 40 * s / 400, 110 * s / 400)
-                                : strip.Color(0, 120 * s / 400, 50 * s / 400);
-                            onePixel = true;
-                        }
+                        currentPixelColor = heartbeatColor(now);
+                        onePixel = true;
                         break;
                     }
                     case MODE_SKY_SWEEPER: {
@@ -683,7 +737,7 @@ void hardwareInit() {
     if (prefs.begin(BUZZER_NVS_NS, true)) {
         buzzerEnabled = prefs.getBool("on", true);
         uint8_t led = prefs.getUChar("led", LED_FULL);
-        ledMode = led > LED_FULL ? LED_FULL : led;
+        ledMode = led > LED_NEARBY ? LED_NEARBY : led;
         uint8_t th = prefs.getUChar("theme", THEME_CLASSIC);
         themeId = th > THEME_PARTY ? THEME_CLASSIC : th;
         uint8_t v = prefs.getUChar("vol", VOL_HIGH);
@@ -824,7 +878,7 @@ bool isBuzzerEnabled() {
 }
 
 void setLedMode(uint8_t mode) {
-    ledMode = mode > LED_FULL ? LED_FULL : mode;   // the render loop picks it up next tick
+    ledMode = mode > LED_NEARBY ? LED_NEARBY : mode;   // the render loop picks it up next tick
     // Outside hwMutex, for the same reason as setBuzzerEnabled(): NVS is slow.
     Preferences prefs;
     if (prefs.begin(BUZZER_NVS_NS, false)) {
@@ -1036,4 +1090,9 @@ void triggerCategoryAlert(AlertCategory cat) {
         animStart = millis();
     }
     xSemaphoreGive(hwMutex);
+}
+
+void setNearbyCounts(const uint16_t counts[NEARBY_CATEGORIES]) {
+    // The render loop latches each one when that pixel's next cycle starts.
+    for (int i = 0; i < NEARBY_CATEGORIES; i++) nearbyCounts[i] = counts[i];
 }

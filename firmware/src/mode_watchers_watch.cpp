@@ -35,6 +35,7 @@
 #include "attack_detectors.h"
 #include <algorithm>
 #include "hardware_manager.h"
+#include "nearby.h"
 #include "capabilities.h"
 #include "mode_manager.h"
 #include "c5_radio.h"
@@ -2466,6 +2467,41 @@ static void watchersPeriodicTask(void *pvParameters) {
                 } else {
                     i++;
                 }
+            }
+
+            // Nearby LED mode: per-category device counts, the same list and
+            // the same numbers as the app's Everything rows. Every device the
+            // push would list (its own predicate), categorized or not, is
+            // grouped once with the app's groupSiblings() rules -- across
+            // categories and through uncategorized radios, as the app groups
+            // its whole list -- and each unit counts once under its lead's
+            // category (unitLead: type beats matched rule beats nothing, ties
+            // to the first). A "no match" lead is not counted. Ignored and
+            // muted devices count: the app still lists them. Only under
+            // Nearby: otherwise nothing reads the counts, so skip the work and
+            // its ~10 KB of short-lived heap at 400 tracked devices, and zero
+            // the counts so re-selecting Nearby never shows stale ones.
+            static_assert(WATCHERS_MAX_TARGETS <= NEARBY_MAX_RADIOS,
+                          "nearbyCount() takes at most NEARBY_MAX_RADIOS devices");
+            if (getLedMode() != LED_NEARBY) {
+                static const uint16_t none[NEARBY_CATEGORIES] = {0, 0, 0, 0, 0};
+                setNearbyCounts(none);
+            } else {
+                std::vector<NearbyRadio> listed;
+                listed.reserve(trackedTargets.size());
+                for (const auto& t : trackedTargets) {
+                    if (!nearbyInclude(scanAll, t.confidence, CONF_LIST_MIN,
+                                       t.type.c_str(), t.matchedRule.c_str())) continue;
+                    listed.push_back({t.mac.c_str(), t.protocol == "WiFi", t.wifiCh,
+                                      nearbyLabel(scanAll, t.confidence, CONF_LIST_MIN,
+                                                  t.type.c_str(), t.matchedRule.c_str()),
+                                      nearbyRank(t.type.c_str(), t.matchedRule.c_str())});
+                }
+                uint16_t nearby[NEARBY_CATEGORIES];
+                nearbyCount(listed.data(), listed.size(),
+                            [](const char* label) { return (int)alertCategoryFromName(label); },
+                            nearby);
+                setNearbyCounts(nearby);
             }
 
             // Click only while the target is actually being heard. The hunt

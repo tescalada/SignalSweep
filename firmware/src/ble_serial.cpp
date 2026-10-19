@@ -208,7 +208,7 @@ String getBleConfigJson() {
     // buzzer control from here rather than assuming a freshly-connected board
     // is audible. It used to be the one setting the phone owned by guessing.
     doc["buzzer"] = isBuzzerEnabled();
-    doc["led"] = getLedMode();   // 0 off, 1 one LED, 2 dim, 3 full
+    doc["led"] = getLedMode();   // 0 off, 1 one LED, 2 dim, 3 full, 4 nearby
     doc["theme"] = getTheme();   // 0 classic, 1 night, 2 terminal, 3 glacier, 4 party
     doc["vol"] = getVolume();    // 0 low, 1 med, 2 high
 #if CONFIG_IDF_TARGET_ESP32C5
@@ -796,10 +796,10 @@ void processIncomingCommand(const String& rawCommand) {
             sendConfigReply();
         }
 
-        // 2b. Lights: {"led":0..3} = off / one LED / dim / full. Persisted,
+        // 2b. Lights: {"led":0..4} = off / one LED / dim / full / nearby. Persisted,
         // and answered so the app paints from the device, like the buzzer.
         if (doc["led"].is<int>()) {
-            setLedMode((uint8_t)constrain(doc["led"].as<int>(), 0, (int)LED_FULL));
+            setLedMode((uint8_t)constrain(doc["led"].as<int>(), 0, (int)LED_NEARBY));
             sendConfigReply();
         }
 

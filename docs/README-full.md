@@ -216,7 +216,7 @@ per line, plus a few raw ones:
 
 ```
 CMD:CFG            name, address mode, hunt target, filter, receive-only,
-                   per-radio scan state, beep mask, buzzer, LED mode,
+                   per-radio scan state, beep mask, buzzer, LED mode (0-4),
                    alert count, uptime (seconds)
 CMD:SIGS:RESET     restore the built-in signature rules
 CMD:RXONLY:ON|OFF  enter / leave receive-only
@@ -227,7 +227,7 @@ CMD:HOST:BYE       app is closing the port; chirps
 ```
 
 JSON settings include `{"beep_mask":N}` (one bit per alert category, 0x1F =
-all) and `{"led":0..3}` (lights off / one LED / dim / full). Both survive a
+all) and `{"led":0..4}` (lights off / one LED / dim / full / nearby). Both survive a
 power cycle.
 
 A paused radio is reported as `ble_scan` / `wifi_scan` in `CMD:CFG`, and the

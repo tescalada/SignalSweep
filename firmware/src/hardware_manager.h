@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include "mode_manager.h"
+#include "nearby.h"
 
 #if CONFIG_IDF_TARGET_ESP32C5
 // XIAO ESP32-C5: the same D1/D2 pads as the S3 harness, different GPIOs
@@ -77,9 +78,13 @@ bool isBuzzerEnabled();
 
 // How much of the LED bar may light. Applied as the last step of every frame,
 // so every animation, the hunt meter and the heartbeat obey it. Persisted.
-enum LedMode : uint8_t { LED_OFF = 0, LED_ONE = 1, LED_DIM = 2, LED_FULL = 3 };
+// Nearby is a bar whose idle frame is a live count: one pixel per
+// AlertCategory, filled from the far end of the strip, blinks once per listed
+// device of that category; pixel 0 keeps the heartbeat, and the pixels at that
+// end flash when a new device alerts. Themes do not recolor it.
+enum LedMode : uint8_t { LED_OFF = 0, LED_ONE = 1, LED_DIM = 2, LED_FULL = 3, LED_NEARBY = 4 };
 
-/** @brief Set the LED mode (clamped to LED_FULL) and persist it. */
+/** @brief Set the LED mode (clamped to LED_NEARBY) and persist it. */
 void setLedMode(uint8_t mode);
 
 /** @brief Current LED mode; no mutex, reported by CMD:CFG and the 1 Hz push. */
@@ -177,5 +182,13 @@ AlertCategory alertCategoryFromName(const char* category);
  * @brief Sound the buzzer pattern for a device category (headless identification).
  */
 void triggerCategoryAlert(AlertCategory cat);
+
+/**
+ * @brief Per-category device counts for the Nearby LED mode, indexed by
+ * AlertCategory (NEARBY_CATEGORIES in nearby.h). Called by the 1 Hz watchers
+ * task; no mutex, same contract as the LED mode (single 16-bit stores the
+ * render loop reads). No cap: each pixel blinks its full count.
+ */
+void setNearbyCounts(const uint16_t counts[NEARBY_CATEGORIES]);
 
 #endif // HARDWARE_MANAGER_H

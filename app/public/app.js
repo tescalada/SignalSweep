@@ -3690,7 +3690,7 @@
             setSoundsSummary();
         }
 
-        // LED mode: 0 off, 1 one LED, 2 dim, 3 full (firmware LedMode). Same
+        // LED mode: 0 off, 1 one LED, 2 dim, 3 full, 4 nearby (firmware LedMode). Same
         // contract as the buzzer -- painted only from device frames, a tap
         // just asks and marks the button pending until the reply lands.
         let ledMode = null;
@@ -3742,6 +3742,10 @@
             // or Party's note would show even though One overrides it.
             if (typeof theme === 'number' && theme !== 0 && led === 1)
                 return 'One LED keeps Classic colours, so you can still tell alerts apart.';
+            // Nearby is exempt from the theme too (applyTheme in the firmware):
+            // each pixel's color is its category.
+            if (typeof theme === 'number' && theme !== 0 && led === 4)
+                return 'Nearby keeps each category in its own color, so the theme does not change the bar.';
             if (theme === 4 && led !== 0) return 'Party lights the whole bar all the time. Anyone nearby can see it.';
             return '';
         }
@@ -5167,7 +5171,12 @@
                     themeNote(2, 1).startsWith('One LED') &&
                     themeNote(0, 1) === '' &&
                     themeNote(2, 3) === '' &&
-                    themeNote(null, 1) === '';
+                    themeNote(null, 1) === '' &&
+                    themeNote(4, 4).startsWith('Nearby') &&
+                    themeNote(2, 4).startsWith('Nearby') &&
+                    themeNote(1, 4).startsWith('Nearby') &&
+                    themeNote(0, 4) === '' &&
+                    themeNote(null, 4) === '';
 
                 // Ring only where the firmware heard Immediate Alert / Link Loss
                 // advertised: never on Wi-Fi, never on an AirTag.

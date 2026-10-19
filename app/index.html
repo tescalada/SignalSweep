@@ -813,7 +813,7 @@
            layout class they had no business in. */
         /* Off + On, or Off + three volume levels: one column per visible button. */
         #sound-modes { grid-template-columns:none; grid-auto-flow:column; grid-auto-columns:1fr; }
-        #led-modes { grid-template-columns:repeat(4,1fr); }
+        #led-modes { grid-template-columns:repeat(5,1fr); }
         /* Theme chips: a sideways strip, not a grid -- five names don't fit a
            phone row, and scrolling keeps every tap target 44 px. */
         #theme-modes { display:flex; gap:6px; overflow-x:auto; margin-top:8px;
@@ -1223,9 +1223,10 @@
                         <button class="radio-tab" data-led="1" aria-pressed="false">One</button>
                         <button class="radio-tab" data-led="2" aria-pressed="false">Dim</button>
                         <button class="radio-tab" data-led="3" aria-pressed="false">Full</button>
+                        <button class="radio-tab" data-led="4" aria-pressed="false">Nearby</button>
                     </div>
                 </div>
-                <p class="set-note alert-note">One lights a single LED in the alert&rsquo;s colour. Off stays dark, even during an alert.</p>
+                <p class="set-note alert-note">One lights a single LED in the alert&rsquo;s colour. Nearby gives each category one LED that blinks once per device nearby, and flashes the LEDs at the heartbeat end on a new alert. Off stays dark, even during an alert.</p>
 
                 <div class="alert-sec">Alert for</div>
                 <p class="set-note" id="alerts-dead" style="color:var(--accent-amber);margin-bottom:8px;" hidden>Sound and lights are both off, so nothing will alert.</p>
