@@ -1,0 +1,23 @@
+[project]
+name = "signalsweep-bench"
+version = "0.1.0"
+description = "Hardware bench checks for a SignalSweep board over USB and Bluetooth"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "bleak>=3.0.2",
+    "pyserial>=3.5",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+# One Bluetooth link for the whole run, so every fixture and test shares the
+# session's event loop.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
